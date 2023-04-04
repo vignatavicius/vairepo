@@ -1,0 +1,298 @@
+formatVersion: 1
+inputs:
+  ipaddress1:
+    type: string
+    title: Enter your IP address for the mysql server range 172.20.11.180-199
+    pattern: '172.20.11.[1][8-9][0-9]'
+    description: This will be the IP address for the mysql server
+    default: 172.20.11.185
+  ipaddress2:
+    type: string
+    title: Enter your IP address for the frontend server range 172.20.11.180-199
+    pattern: '172.20.11.[1][8-9][0-9]'
+    description: This will be the IP address for the front end server
+    default: 172.20.11.186
+  hostname1:
+    type: string
+    title: mysql hostname
+    default: mysql
+    description: Name of the mysql server. This name will be used to set the internal hostname and is part of the FQDN for DNS.
+  hostname2:
+    type: string
+    title: frontend hostname
+    default: frontend
+    description: Name of the front end server. This name will be used to set the internal hostname and is part of the FQDN for DNS.
+  user:
+    type: string
+    title: User name for the system administrator account
+    default: superadmin
+    description: This user name will have administrator privileges in the MySQL database and can be used to log into the front end server.
+  pass:
+    type: string
+    title: Password for the superadmin account.
+    encrypted: true
+    default: VMware1!
+    description: Password for the superadmin account.
+resources:
+  frontend:
+    type: Cloud.Machine
+    dependsOn:
+      - mysql
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      image: VMW-Ubuntu-Cloud
+      flavor: VMW-Large
+      networks:
+        - network: '${resource.Cloud_Network_1.id}'
+      cloudConfig: |
+        package_update: true
+        package_upgrade: true
+        packages:
+          - apache2
+          - php
+          - php-mysql
+          - libapache2-mod-php
+          - php-gd
+          - php-mbstring
+          - php-xml
+          - php-zip
+          - php-curl
+          - mysql-server-5.7
+          - unzip
+          - curl
+
+        users:
+          - name: ${input.user}
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            groups: sudo
+            shell: /bin/bash
+            
+        runcmd:
+
+
+          - export DEBIAN_FRONTEND=noninteractive
+          
+          - echo "VRA- Setting static IP" >> /root/log.txt
+          - echo "VRA- Setting static IP" 
+          - mkdir -p /root/myconfig
+          - cp /etc/netplan/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml.sav
+          - chmod 777 /etc/netplan/50-cloud-init.yaml
+          - touch /root/myconfig/50-cloud-init.yaml
+          - echo "network:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "  version:"" 2" >> /root/myconfig/50-cloud-init.yaml
+          - echo "  ethernets:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "    ens160:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      dhcp4:"" false " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      addresses:"" [${input.ipaddress2}/24]" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      gateway4:"" 172.20.11.10" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      nameservers:"" ">> /root/myconfig/50-cloud-init.yaml
+          - echo "        addresses:"" [172.20.11.10]" >> /root/myconfig/50-cloud-init.yaml
+          - cp /root/myconfig/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml
+          - chmod 644 /etc/netplan/50-cloud-init.yaml
+          - netplan apply
+          
+          - echo "VRA- Setting hostname" >> /root/log.txt
+          - hostnamectl  set-hostname "${input.hostname2}.vclass.local"
+                    
+          - echo "VRA- Creating Users" >> /root/log.txt   
+          - echo "VRA- Creating Users" 
+          - USER=${input.user}
+          - PASS=${input.pass}
+          - echo $USER:$PASS | /usr/sbin/chpasswd
+          - sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          - service ssh reload       
+          
+          - echo "VRA- Creating mySQL users" >> /root/log.txt
+          - echo "VRA- Creating mySQL users" 
+          - echo "mysql-server-5.7 mysql-server/root_password password root" | sudo debconf-set-selections
+          - echo "mysql-server-5.7 mysql-server/root_password_again password root" | sudo debconf-set-selections
+          - echo "[client]" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=$USER" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=$PASS" >> /etc/mysql/mysql.conf.d/mysqld.cnf   
+          - echo "$USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+          
+          - echo "VRA- Configuring mySQL IP" >> /root/log.txt
+          - echo "VRA- Configuring mySQL IP" 
+          - sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/mysql.conf.d/mysqld.cnf
+          - systemctl restart mysql
+
+          - echo "VRA- Giving mySQL users DB rights" >> /root/log.txt
+          - echo "VRA- Giving mySQL users DB rights" 
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@'%' IDENTIFIED BY '$PASS'"
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@localhost IDENTIFIED BY '$PASS'"
+          - mysql -u root -e 'flush privileges'
+          
+          - echo "VRA- Installing myphpadmin"  >> /root/log.txt
+          - echo "VRA- Installing myphpadmin"  
+          - export DEBIAN_FRONTEND=noninteractive
+          - apt-get -yq install phpmyadmin
+
+          - echo "VRA- creating myphpadmin config file"  >> /root/log.txt
+          - echo “VRA Creating phpmyadmin configuration file”         
+          - touch /root/my_phpmyadmin.conf
+          - echo "dbc_install='true'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_upgrade='true'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_remove='true'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbtype='mysql'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbuser=$USER" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbpass=$PASS" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dballow='localhost'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbserver='localhost'">> /root/my_phpmyadmin.conf
+          - echo "dbc_dbport='3306'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbname='phpmyadmin'" >> /root/my_phpmyadmin.conf
+          - echo "dbc_dbadmin='debian-sys-maint'">> /root/my_phpmyadmin.conf
+          - echo "dbc_basepath=''" >> /root/my_phpmyadmin.conf
+          - echo "dbc_ssl=''">> /root/my_phpmyadmin.conf
+          - echo "dbc_authmethod_admin=''" >> /root/my_phpmyadmin.conf
+          - echo "dbc_authmethod_user=''" >> /root/my_phpmyadmin.conf
+          - echo “Finished creating phpmyadmin configuration file” >> /root/log.txt
+          - echo “Finished creating phpmyadmin configuration file”
+
+          - echo "VRA- Loading myphpadmin configuration" >> /root/log.txt
+          - echo "VRA- Loading myphpadmin configuration" 
+          - cp /etc/dbconfig-common/phpmyadmin.conf /etc/dbconfig-common/phpmyadmin.conf.sav
+          - cp /root/my_phpmyadmin.conf /etc/dbconfig-common/phpmyadmin.conf
+          - dpkg-reconfigure --frontend=noninteractive phpmyadmin
+          - phpenmod mbstring
+          - echo "myphpadmin install complete"  >> /root/log.txt
+          - echo "VRA - myphpadmin install complete" 
+          - echo "VRA - modifying apache2 start file" >> /root/log.txt
+          - echo "VRA - modifying apache2 start file"
+          - echo "Include /etc/phpmyadmin/apache.conf" >> /etc/apache2/apache2.conf
+                    
+          - echo "VRA - Reloading SSH and Apache2" >> /root/log.txt
+          - echo "VRA - Reloading SSH and Apache2" 
+          - service ssh reload      
+          - systemctl reload apache2
+          - systemctl restart apache2
+          
+          - echo “VRA - Creating phpmyadmin multi-host configuration file”  >> /root/log.txt
+          - echo “VRA - Creating phpmyadmin multi-host configuration file” 
+          - touch /root/my_phpmyadmin-host.conf
+
+          - echo "\$i++;" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['host']     = '${input.ipaddress1}';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['port']     = '3306';" >> /root/my_phpmyadmin-host.conf
+
+          - echo "\$cfg['Servers'][\$i]['connect_type']     = 'tcp';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['extension']     = 'mysql';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['compress']     = 'FALSE';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['auth_type']     = 'config';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['user']     = '$USER';" >> /root/my_phpmyadmin-host.conf
+          - echo "\$cfg['Servers'][\$i]['password']     = '$PASS';" >> /root/my_phpmyadmin-host.conf
+
+          - echo "VRA - Adding remote host to phpmyadmin configuration file"
+          - echo "VRA - Adding remote host to phpmyadmin configuration file" >> /root/log.txt
+          - cp /etc/phpmyadmin/config.inc.php /etc/phpmyadmin/config.inc.php.sav
+          - cat /root/my_phpmyadmin-host.conf >> /etc/phpmyadmin/config.inc.php
+
+          - echo 'VRA - Cloud-init is done about to order reboot' >> /root/log.txt
+          - echo 'VRA - Cloud-init is done about to order reboot'
+        power_state:
+          delay: +02
+          mode: reboot
+          
+          
+  mysql:
+    type: Cloud.Machine
+    metadata:
+      layoutPosition:
+        - 0
+        - 1
+    properties:
+      image: VMW-Ubuntu-Cloud
+      flavor: VMW-Large
+      networks:
+        - network: '${resource.Cloud_Network_1.id}'
+      cloudConfig: |
+        package_update: true
+        package_upgrade: true
+        packages:
+          - mysql-server-5.7
+          - mysql-client
+          - unzip
+          - git
+          
+        users:
+          - name: ${input.user}
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            groups: sudo
+            shell: /bin/bash
+
+        runcmd:
+          - touch /root/log.txt
+          - echo 'VRA - Starting runcmd' >> /root/log.txt
+          - echo 'VRA - Starting runcmd' 
+          
+          - echo "VRA - Setting static IP" >> root/log.txt
+          - echo "VRA - Setting static IP" 
+          - mkdir -p /root/myconfig
+          - cp /etc/netplan/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml.sav
+          - chmod 777 /etc/netplan/50-cloud-init.yaml
+          - touch /root/myconfig/50-cloud-init.yaml
+          - echo "network:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "  version:"" 2" >> /root/myconfig/50-cloud-init.yaml
+          - echo "  ethernets:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "    ens160:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      dhcp4:"" false " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      addresses:"" [${input.ipaddress1}/24]" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      gateway4:"" 172.20.11.10" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      nameservers:"" ">> /root/myconfig/50-cloud-init.yaml
+          - echo "        addresses:"" [172.20.11.10]" >> /root/myconfig/50-cloud-init.yaml
+          - cp /root/myconfig/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml
+          - chmod 644 /etc/netplan/50-cloud-init.yaml
+          - netplan apply
+          
+          - echo 'Setting host DNS name' >> /root/log.txt
+          - echo 'Setting host DNS name'
+          - hostnamectl  set-hostname "${input.hostname1}.vclass.local"
+
+          - USER=${input.user}
+          - PASS=${input.pass}
+          - echo $USER:$PASS | /usr/sbin/chpasswd
+          - sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          - service ssh reload
+          - echo 'VRA ssh reload complete' >> /root/log.txt
+          - echo 'VRA ssh reload complete' 
+          - echo "mysql-server-5.7 mysql-server/root_password password root" | sudo debconf-set-selections
+          - echo "mysql-server-5.7 mysql-server/root_password_again password root" | sudo debconf-set-selections
+          - echo "[client]" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=$USER" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=$PASS" >> /etc/mysql/mysql.conf.d/mysqld.cnf 
+          
+          - echo 'VRA setting mySQL IP configuration' >> /root/log.txt
+          - echo 'VRA setting mySQL IP configuration' 
+          - sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/mysql.conf.d/mysqld.cnf
+          - systemctl restart mysql
+          - echo 'mySQL restart complete' >> /root/log.txt
+          - echo 'VRA - mysql restart complete' 
+          
+          - echo 'Setting mySQL user rights' >> /root/log.txt
+          - echo 'Setting mySQL user rights' 
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@'%' IDENTIFIED BY '$PASS'"
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@localhost IDENTIFIED BY '$PASS'"
+          - mysql -u root -e 'CREATE DATABASE myvRAdb'
+          - mysql -u root -e 'USE myvRAdb'
+          - mysql -u root -e 'flush privileges'          
+          
+
+          - echo 'VRA - Cloud-init is done!' >> /root/log.txt
+          - echo 'VRA - Cloud-init is done!'
+  Cloud_Network_1:
+    type: Cloud.Network
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      networkType: existing
+      name: VMW-Production
+      constraints:
+        - tag: 'net:production'

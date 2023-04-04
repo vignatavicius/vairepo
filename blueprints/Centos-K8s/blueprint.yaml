@@ -1,0 +1,105 @@
+formatVersion: 1
+inputs:
+  hostname1:
+    type: string
+    title: Enter your K8S master hostname
+    default: K8S-Master
+    description: This wil be the internal DNS hostname of the machine
+  ipaddress:
+    type: string
+    pattern: '172.20.11.[1][8-9][0-9]'
+    default: 172.20.11.185
+    title: Enter your IP address in CIDR format for the K8S Master
+    description: This will be the IP address in CIDR format
+  numberWorkers:
+    type: integer
+    title: Number of worker nodes
+    default: 1
+resources:
+  Ansible-Master:
+    type: Cloud.Ansible
+    metadata:
+      layoutPosition:
+        - 0
+        - 1
+    properties:
+      host: '${resource["K8S-Master"].*}'
+      osType: linux
+      account: SA-Ansible
+      username: vmuser
+      password: VMware1!
+      authentication: usernamePassword
+      inventoryFile: /etc/ansible/hosts
+      playbooks:
+        provision:
+          - /etc/ansible/k8s_setup_master_node.yml
+      maxConnectionRetries: 2
+      groups:
+        - K8SAll
+        - kubernetesMasterNodes
+      hostVariables:
+        masterHostName: '${input.hostname1}'
+        masterIPAddress: '${input.ipaddress}'
+        add_addr: '${input.ipaddress}'
+  Ansible-Worker:
+    type: Cloud.Ansible
+    metadata:
+      layoutPosition:
+        - 0
+        - 2
+    properties:
+      host: '${resource["K8S-Worker"].*}'
+      osType: linux
+      account: SA-Ansible
+      username: vmuser
+      password: VMware1!
+      authentication: usernamePassword
+      inventoryFile: /etc/ansible/hosts
+      count: '${input.numberWorkers}'
+      playbooks:
+        provision:
+          - /etc/ansible/k8s_setup_worker_nodes.yml
+      maxConnectionRetries: 2
+      groups:
+        - K8SAll
+        - kubernetesWorkerNodes
+  K8S-Master:
+    type: Cloud.vSphere.Machine
+    metadata:
+      layoutPosition:
+        - 1
+        - 1
+    properties:
+      image: VMW-CentOS
+      flavor: VMW-Large
+      customizationSpec: Lin-Cust
+      networks:
+        - network: '${resource.Cloud_vSphere_Network_1.id}'
+          assignment: static
+          address: '${input.ipaddress}'
+  K8S-Worker:
+    type: Cloud.vSphere.Machine
+    dependsOn:
+      - Ansible-Master
+    metadata:
+      layoutPosition:
+        - 1
+        - 2
+    properties:
+      count: '${input.numberWorkers}'
+      image: VMW-CentOS
+      flavor: VMW-Large
+      customizationSpec: Lin-Cust
+      networks:
+        - network: '${resource.Cloud_vSphere_Network_1.id}'
+          assignment: static
+  Cloud_vSphere_Network_1:
+    type: Cloud.vSphere.Network
+    metadata:
+      layoutPosition:
+        - 2
+        - 0
+    properties:
+      networkType: existing
+      name: VMW-Production
+      networkCidr: 172.20.11.0/24

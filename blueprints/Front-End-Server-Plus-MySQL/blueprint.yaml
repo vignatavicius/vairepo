@@ -1,0 +1,221 @@
+formatVersion: 1
+inputs:
+  ipaddress1:
+    type: string
+    title: Enter your IP address for the mysql server range 172.20.11.180-199
+    pattern: '172.20.11.[1][8-9][0-9]'
+    description: This will be the IP address for the mysql server
+    default: 172.20.11.185
+  ipaddress2:
+    type: string
+    title: Enter your IP address for the frontend server range 172.20.11.180-199
+    pattern: '172.20.11.[1][8-9][0-9]'
+    description: This will be the IP address for the front end server
+    default: 172.20.11.186
+  hostname1:
+    type: string
+    title: mysql hostname
+    default: mysql
+    description: Name of the mysql server. This name will be used to set the internal hostname and is part of the FQDN for DNS.
+  hostname2:
+    type: string
+    title: frontend hostname
+    default: frontend
+    description: Name of the front end server. This name will be used to set the internal hostname and is part of the FQDN for DNS.
+  user:
+    type: string
+    title: User name for the system administrator account
+    default: superadmin
+    description: This user name will have administrator privileges in the MySQL database and can be used to log into the front end server.
+  pass:
+    type: string
+    title: Password for the superadmin account.
+    encrypted: true
+    default: VMware1!
+    description: Password for the superadmin account.
+resources:
+  frontend:
+    type: Cloud.Machine
+    dependsOn:
+      - mysql
+    metadata:
+      layoutPosition:
+        - 0
+        - 0
+    properties:
+      image: VMW-Ubuntu-Cloud
+      flavor: VMW-Large
+      networks:
+        - network: '${resource.Cloud_Network_1.id}'
+      cloudConfig: |
+        package_update: true
+        package_upgrade: true
+        packages:
+          - mysql-server-5.7
+          - mysql-client
+          - unzip
+          - git 
+
+        users:
+          - name: ${input.user}
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            groups: sudo
+            shell: /bin/bash
+            
+        runcmd:
+
+          
+          - echo "VRA- Setting static IP" >> /root/log.txt
+          - echo "VRA- Setting static IP" 
+          - mkdir -p /root/myconfig
+          - cp /etc/netplan/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml.sav
+          - chmod 777 /etc/netplan/50-cloud-init.yaml
+          - touch /root/myconfig/50-cloud-init.yaml
+          - echo "network:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "  version:"" 2" >> /root/myconfig/50-cloud-init.yaml
+          - echo "  ethernets:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "    ens160:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      dhcp4:"" false " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      addresses:"" [${input.ipaddress2}/24]" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      gateway4:"" 172.20.11.10" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      nameservers:"" ">> /root/myconfig/50-cloud-init.yaml
+          - echo "        addresses:"" [172.20.11.10]" >> /root/myconfig/50-cloud-init.yaml
+          - cp /root/myconfig/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml
+          - chmod 644 /etc/netplan/50-cloud-init.yaml
+          - netplan apply
+          
+          - echo "VRA- Setting hostname" >> /root/log.txt
+          - hostnamectl  set-hostname "${input.hostname2}.vclass.local"
+                    
+          - echo "VRA- Creating Users" >> /root/log.txt   
+          - echo "VRA- Creating Users" 
+          - USER=${input.user}
+          - PASS=${input.pass}
+          - echo $USER:$PASS | /usr/sbin/chpasswd
+          - sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          - service ssh reload       
+          
+          - echo "VRA- Creating mySQL users" >> /root/log.txt
+          - echo "VRA- Creating mySQL users" 
+          - echo "mysql-server-5.7 mysql-server/root_password password root" | sudo debconf-set-selections
+          - echo "mysql-server-5.7 mysql-server/root_password_again password root" | sudo debconf-set-selections
+          - echo "[client]" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=$USER" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=$PASS" >> /etc/mysql/mysql.conf.d/mysqld.cnf   
+          - echo "$USER ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+          
+          - echo "VRA- Configuring mySQL IP" >> /root/log.txt
+          - echo "VRA- Configuring mySQL IP" 
+          - sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/mysql.conf.d/mysqld.cnf
+          - systemctl restart mysql
+
+          - echo "VRA- Giving mySQL users DB rights" >> /root/log.txt
+          - echo "VRA- Giving mySQL users DB rights" 
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@'%' IDENTIFIED BY '$PASS'"
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@localhost IDENTIFIED BY '$PASS'"
+          - mysql -u root -e 'flush privileges'
+          
+
+          
+
+          
+  mysql:
+    type: Cloud.Machine
+    metadata:
+      layoutPosition:
+        - 0
+        - 1
+    properties:
+      image: VMW-Ubuntu-Cloud
+      flavor: VMW-Large
+      networks:
+        - network: '${resource.Cloud_Network_1.id}'
+      cloudConfig: |
+        package_update: true
+        package_upgrade: true
+        packages:
+          - mysql-server-5.7
+          - mysql-client
+          - unzip
+          - git
+          
+        users:
+          - name: ${input.user}
+            sudo: ['ALL=(ALL) NOPASSWD:ALL']
+            groups: sudo
+            shell: /bin/bash
+
+        runcmd:
+          - touch /root/log.txt
+          - echo 'VRA - Starting runcmd' >> /root/log.txt
+          - echo 'VRA - Starting runcmd' 
+          
+          - echo "VRA - Setting static IP" >> root/log.txt
+          - echo "VRA - Setting static IP" 
+          - mkdir -p /root/myconfig
+          - cp /etc/netplan/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml.sav
+          - chmod 777 /etc/netplan/50-cloud-init.yaml
+          - touch /root/myconfig/50-cloud-init.yaml
+          - echo "network:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "  version:"" 2" >> /root/myconfig/50-cloud-init.yaml
+          - echo "  ethernets:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "    ens160:"" " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      dhcp4:"" false " >> /root/myconfig/50-cloud-init.yaml
+          - echo "      addresses:"" [${input.ipaddress1}/24]" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      gateway4:"" 172.20.11.10" >> /root/myconfig/50-cloud-init.yaml
+          - echo "      nameservers:"" ">> /root/myconfig/50-cloud-init.yaml
+          - echo "        addresses:"" [172.20.11.10]" >> /root/myconfig/50-cloud-init.yaml
+          - cp /root/myconfig/50-cloud-init.yaml /etc/netplan/50-cloud-init.yaml
+          - chmod 644 /etc/netplan/50-cloud-init.yaml
+          - netplan apply
+          
+          - echo 'Setting host DNS name' >> /root/log.txt
+          - echo 'Setting host DNS name'
+          - hostnamectl  set-hostname "${input.hostname1}.vclass.local"
+
+          - USER=${input.user}
+          - PASS=${input.pass}
+          - echo $USER:$PASS | /usr/sbin/chpasswd
+          - sed -i "s/PasswordAuthentication no/PasswordAuthentication yes/g" /etc/ssh/sshd_config
+          - service ssh reload
+          - echo 'VRA ssh reload complete' >> /root/log.txt
+          - echo 'VRA ssh reload complete' 
+          - echo "mysql-server-5.7 mysql-server/root_password password root" | sudo debconf-set-selections
+          - echo "mysql-server-5.7 mysql-server/root_password_again password root" | sudo debconf-set-selections
+          - echo "[client]" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=root" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "user=$USER" >> /etc/mysql/mysql.conf.d/mysqld.cnf
+          - echo "password=$PASS" >> /etc/mysql/mysql.conf.d/mysqld.cnf 
+          
+          - echo 'VRA setting mySQL IP configuration' >> /root/log.txt
+          - echo 'VRA setting mySQL IP configuration' 
+          - sed -i 's/127.0.0.1/0.0.0.0/g' /etc/mysql/mysql.conf.d/mysqld.cnf
+          - systemctl restart mysql
+          - echo 'mySQL restart complete' >> /root/log.txt
+          - echo 'VRA - mysql restart complete' 
+          
+          - echo 'Setting mySQL user rights' >> /root/log.txt
+          - echo 'Setting mySQL user rights' 
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@'%' IDENTIFIED BY '$PASS'"
+          - mysql -u root -e "GRANT ALL ON *.* TO '$USER'@localhost IDENTIFIED BY '$PASS'"
+          - mysql -u root -e 'CREATE DATABASE myvRAdb'
+          - mysql -u root -e 'USE myvRAdb'
+          - mysql -u root -e 'flush privileges'          
+          
+
+          - echo 'VRA - Cloud-init is done!' >> /root/log.txt
+          - echo 'VRA - Cloud-init is done!'
+  Cloud_Network_1:
+    type: Cloud.Network
+    metadata:
+      layoutPosition:
+        - 1
+        - 0
+    properties:
+      networkType: existing
+      name: VMW-Production
+      constraints:
+        - tag: 'net:production'
